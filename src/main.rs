@@ -1,8 +1,14 @@
-use std::env;
+use axum::{routing::post, Json, Router};
+use serde::Deserialize;
 use std::process::Command;
 use std::time::Duration;
-
 use wait_timeout::ChildExt;
+
+#[derive(Deserialize)]
+struct CommandRequest {
+    command: String,
+    args: Vec<String>,
+}
 
 const ALLOWED_COMMANDS: &[&str] = &["ls", "pwd", "cat", "echo"];
 const ALLOWED_FLAGS: &[&str] = &["-l", "-a"];
@@ -17,51 +23,30 @@ fn resolve_command(cmd: &str) -> Option<&'static str> {
     }
 }
 
-fn main() {
-    let args: Vec<String> = env::args().collect();
-
-    if args.len() < 2 {
-        eprintln!("Usage: mini_sandbox <command> [args]");
-        return;
-    }
-
-    let command = &args[1];
-
+async fn execute(Json(payload): Json<CommandRequest>) -> String {
     // 🔒 Command whitelist
-    if !ALLOWED_COMMANDS.contains(&command.as_str()) {
-        eprintln!("Command not allowed");
-        return;
+    if !ALLOWED_COMMANDS.contains(&payload.command.as_str()) {
+        return "Command not allowed".into();
     }
 
-    // 🔒 Resolve command to absolute path
-    let resolved_command = match resolve_command(command) {
-        Some(path) => path,
-        None => {
-            eprintln!("Command resolution failed");
-            return;
-        }
+    // 🔒 Resolve command
+    let resolved_command = match resolve_command(&payload.command) {
+        Some(cmd) => cmd,
+        None => return "Command resolution failed".into(),
     };
 
     // 🔒 Argument validation
-    for arg in &args[2..] {
-        // Block directory traversal
+    for arg in &payload.args {
         if arg.contains("..") {
-            eprintln!("Blocked: directory traversal detected");
-            return;
+            return "Blocked: directory traversal".into();
         }
 
-        // Block absolute paths
         if arg.starts_with("/") {
-            eprintln!("Blocked: absolute paths not allowed");
-            return;
+            return "Blocked: absolute path".into();
         }
 
-        // Restrict flags
-        if arg.starts_with("-") {
-            if !ALLOWED_FLAGS.contains(&arg.as_str()) {
-                eprintln!("Flag not allowed: {}", arg);
-                return;
-            }
+        if arg.starts_with("-") && !ALLOWED_FLAGS.contains(&arg.as_str()) {
+            return format!("Flag not allowed: {}", arg);
         }
     }
 
@@ -69,41 +54,51 @@ fn main() {
     let sandbox_dir = dirs::home_dir().unwrap().join("ai-lab/sandbox");
 
     if !sandbox_dir.exists() {
-        eprintln!("Sandbox directory does not exist: {:?}", sandbox_dir);
-        return;
+        return "Sandbox directory missing".into();
     }
 
-    println!("Executing safely: {:?}", args);
-
-    // 🔒 Spawn process
+    // 🔒 Execute command
     let mut child = match Command::new(resolved_command)
         .current_dir(&sandbox_dir)
         .env_clear()
         .env("PATH", "/usr/bin:/bin")
-        .args(&args[2..])
+        .args(&payload.args)
         .spawn()
     {
-        Ok(child) => child,
-        Err(e) => {
-            eprintln!("Failed to start process: {}", e);
-            return;
-        }
+        Ok(c) => c,
+        Err(e) => return format!("Execution failed: {}", e),
     };
 
-    // 🔒 Timeout protection
+    // 🔒 Timeout
     let timeout = Duration::from_secs(3);
 
     match child.wait_timeout(timeout).unwrap() {
-        Some(_status) => {
+        Some(_) => {
             let output = child.wait_with_output().unwrap();
 
-            println!("{}", String::from_utf8_lossy(&output.stdout));
-            eprintln!("{}", String::from_utf8_lossy(&output.stderr));
+            format!(
+                "STDOUT:\n{}\nSTDERR:\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            )
         }
         None => {
             child.kill().unwrap();
-            println!("Process killed (timeout)");
+            "Process killed (timeout)".into()
         }
     }
+}
+
+#[tokio::main]
+async fn main() {
+    let app = Router::new().route("/execute", post(execute));
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
+        .await
+        .unwrap();
+
+    println!("Sandbox API running on http://127.0.0.1:3000");
+
+    axum::serve(listener, app).await.unwrap();
 }
 
