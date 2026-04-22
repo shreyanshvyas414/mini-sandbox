@@ -1,5 +1,6 @@
 use axum::{routing::post, Json, Router};
 use serde::Deserialize;
+use serde_json::json;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::process::Command;
@@ -15,6 +16,7 @@ struct CommandRequest {
 const ALLOWED_COMMANDS: &[&str] = &["ls", "pwd", "cat", "echo"];
 const ALLOWED_FLAGS: &[&str] = &["-l", "-a"];
 
+//  Resolve command to absolute path
 fn resolve_command(cmd: &str) -> Option<&'static str> {
     match cmd {
         "ls" => Some("/bin/ls"),
@@ -25,7 +27,20 @@ fn resolve_command(cmd: &str) -> Option<&'static str> {
     }
 }
 
-// 🔒 Minimal logging
+//  Only allow read-only commands
+fn is_read_only_command(cmd: &str) -> bool {
+    matches!(cmd, "ls" | "pwd" | "cat" | "echo")
+}
+
+//  Standard JSON response
+fn response(status: &str, message: &str) -> serde_json::Value {
+    json!({
+        "status": status,
+        "message": message
+    })
+}
+
+//  Minimal logging
 fn log_execution(command: &str, args: &[String], output: &str) {
     let log_path = dirs::home_dir().unwrap().join("ai-lab/sandbox.log");
 
@@ -47,46 +62,50 @@ fn log_execution(command: &str, args: &[String], output: &str) {
     }
 }
 
-async fn execute(Json(payload): Json<CommandRequest>) -> String {
-    // 🔒 Command whitelist
+async fn execute(Json(payload): Json<CommandRequest>) -> Json<serde_json::Value> {
+    //  Command whitelist
     if !ALLOWED_COMMANDS.contains(&payload.command.as_str()) {
-        return "Command not allowed".into();
+        return Json(response("error", "Command not allowed"));
     }
 
-    // 🔒 Resolve command
+    //  Resolve command
     let resolved_command = match resolve_command(&payload.command) {
         Some(cmd) => cmd,
-        None => return "Command resolution failed".into(),
+        None => return Json(response("error", "Command resolution failed")),
     };
 
-    // 🔒 Limit number of args
-    if payload.args.len() > 5 {
-        return "Too many arguments".into();
+    //  Read-only enforcement
+    if !is_read_only_command(&payload.command) {
+        return Json(response("error", "Only read-only commands allowed"));
     }
 
-    // 🔒 Validate arguments
+    //  Argument limits
+    if payload.args.len() > 5 {
+        return Json(response("error", "Too many arguments"));
+    }
+
     for arg in &payload.args {
         if arg.contains("..") {
-            return "Blocked: directory traversal".into();
+            return Json(response("error", "Blocked: directory traversal"));
         }
 
         if arg.starts_with("/") {
-            return "Blocked: absolute path".into();
+            return Json(response("error", "Blocked: absolute path"));
         }
 
         if arg.len() > 100 {
-            return "Argument too long".into();
+            return Json(response("error", "Argument too long"));
         }
 
         if arg.starts_with("-") && !ALLOWED_FLAGS.contains(&arg.as_str()) {
-            return format!("Flag not allowed: {}", arg);
+            return Json(response("error", &format!("Flag not allowed: {}", arg)));
         }
     }
 
     let sandbox_dir = dirs::home_dir().unwrap().join("ai-lab/sandbox");
 
     if !sandbox_dir.exists() {
-        return "Sandbox directory missing".into();
+        return Json(response("error", "Sandbox directory missing"));
     }
 
     let mut child = match Command::new(resolved_command)
@@ -97,7 +116,7 @@ async fn execute(Json(payload): Json<CommandRequest>) -> String {
         .spawn()
     {
         Ok(c) => c,
-        Err(e) => return format!("Execution failed: {}", e),
+        Err(e) => return Json(response("error", &format!("Execution failed: {}", e))),
     };
 
     let timeout = Duration::from_secs(3);
@@ -125,7 +144,7 @@ async fn execute(Json(payload): Json<CommandRequest>) -> String {
         }
     };
 
-    result
+    Json(response("ok", &result))
 }
 
 #[tokio::main]
