@@ -1,7 +1,9 @@
 use axum::{routing::post, Json, Router};
 use serde::Deserialize;
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::process::Command;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use wait_timeout::ChildExt;
 
 #[derive(Deserialize)]
@@ -23,6 +25,28 @@ fn resolve_command(cmd: &str) -> Option<&'static str> {
     }
 }
 
+// 🔒 Minimal logging
+fn log_execution(command: &str, args: &[String], output: &str) {
+    let log_path = dirs::home_dir().unwrap().join("ai-lab/sandbox.log");
+
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+
+    let entry = format!(
+        "{} | {} {:?} | {}\n",
+        timestamp,
+        command,
+        args,
+        output.replace("\n", " ")
+    );
+
+    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(log_path) {
+        let _ = file.write_all(entry.as_bytes());
+    }
+}
+
 async fn execute(Json(payload): Json<CommandRequest>) -> String {
     // 🔒 Command whitelist
     if !ALLOWED_COMMANDS.contains(&payload.command.as_str()) {
@@ -35,7 +59,12 @@ async fn execute(Json(payload): Json<CommandRequest>) -> String {
         None => return "Command resolution failed".into(),
     };
 
-    // 🔒 Argument validation
+    // 🔒 Limit number of args
+    if payload.args.len() > 5 {
+        return "Too many arguments".into();
+    }
+
+    // 🔒 Validate arguments
     for arg in &payload.args {
         if arg.contains("..") {
             return "Blocked: directory traversal".into();
@@ -45,19 +74,21 @@ async fn execute(Json(payload): Json<CommandRequest>) -> String {
             return "Blocked: absolute path".into();
         }
 
+        if arg.len() > 100 {
+            return "Argument too long".into();
+        }
+
         if arg.starts_with("-") && !ALLOWED_FLAGS.contains(&arg.as_str()) {
             return format!("Flag not allowed: {}", arg);
         }
     }
 
-    // 🔒 Sandbox directory
     let sandbox_dir = dirs::home_dir().unwrap().join("ai-lab/sandbox");
 
     if !sandbox_dir.exists() {
         return "Sandbox directory missing".into();
     }
 
-    // 🔒 Execute command
     let mut child = match Command::new(resolved_command)
         .current_dir(&sandbox_dir)
         .env_clear()
@@ -69,24 +100,32 @@ async fn execute(Json(payload): Json<CommandRequest>) -> String {
         Err(e) => return format!("Execution failed: {}", e),
     };
 
-    // 🔒 Timeout
     let timeout = Duration::from_secs(3);
 
-    match child.wait_timeout(timeout).unwrap() {
+    let result = match child.wait_timeout(timeout).unwrap() {
         Some(_) => {
             let output = child.wait_with_output().unwrap();
 
-            format!(
-                "STDOUT:\n{}\nSTDERR:\n{}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            )
+            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+            let combined = format!("STDOUT:\n{}\nSTDERR:\n{}", stdout, stderr);
+
+            log_execution(&payload.command, &payload.args, &combined);
+
+            combined
         }
         None => {
             child.kill().unwrap();
-            "Process killed (timeout)".into()
+            let msg = "Process killed (timeout)".to_string();
+
+            log_execution(&payload.command, &payload.args, &msg);
+
+            msg
         }
-    }
+    };
+
+    result
 }
 
 #[tokio::main]
@@ -101,4 +140,3 @@ async fn main() {
 
     axum::serve(listener, app).await.unwrap();
 }
-
