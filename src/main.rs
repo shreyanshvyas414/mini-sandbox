@@ -3,7 +3,7 @@ use serde::Deserialize;
 use serde_json::json;
 use std::fs::OpenOptions;
 use std::io::Write;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use wait_timeout::ChildExt;
 
@@ -16,7 +16,6 @@ struct CommandRequest {
 const ALLOWED_COMMANDS: &[&str] = &["ls", "pwd", "cat", "echo"];
 const ALLOWED_FLAGS: &[&str] = &["-l", "-a"];
 
-//  Resolve command to absolute path
 fn resolve_command(cmd: &str) -> Option<&'static str> {
     match cmd {
         "ls" => Some("/bin/ls"),
@@ -27,12 +26,10 @@ fn resolve_command(cmd: &str) -> Option<&'static str> {
     }
 }
 
-//  Only allow read-only commands
 fn is_read_only_command(cmd: &str) -> bool {
     matches!(cmd, "ls" | "pwd" | "cat" | "echo")
 }
 
-//  Standard JSON response
 fn response(status: &str, message: &str) -> serde_json::Value {
     json!({
         "status": status,
@@ -40,7 +37,6 @@ fn response(status: &str, message: &str) -> serde_json::Value {
     })
 }
 
-//  Minimal logging
 fn log_execution(command: &str, args: &[String], output: &str) {
     let log_path = dirs::home_dir().unwrap().join("ai-lab/sandbox.log");
 
@@ -63,23 +59,19 @@ fn log_execution(command: &str, args: &[String], output: &str) {
 }
 
 async fn execute(Json(payload): Json<CommandRequest>) -> Json<serde_json::Value> {
-    //  Command whitelist
     if !ALLOWED_COMMANDS.contains(&payload.command.as_str()) {
         return Json(response("error", "Command not allowed"));
     }
 
-    //  Resolve command
     let resolved_command = match resolve_command(&payload.command) {
         Some(cmd) => cmd,
         None => return Json(response("error", "Command resolution failed")),
     };
 
-    //  Read-only enforcement
     if !is_read_only_command(&payload.command) {
         return Json(response("error", "Only read-only commands allowed"));
     }
 
-    //  Argument limits
     if payload.args.len() > 5 {
         return Json(response("error", "Too many arguments"));
     }
@@ -108,11 +100,14 @@ async fn execute(Json(payload): Json<CommandRequest>) -> Json<serde_json::Value>
         return Json(response("error", "Sandbox directory missing"));
     }
 
+    // FIX: capture stdout & stderr
     let mut child = match Command::new(resolved_command)
         .current_dir(&sandbox_dir)
         .env_clear()
         .env("PATH", "/usr/bin:/bin")
         .args(&payload.args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .spawn()
     {
         Ok(c) => c,
@@ -159,3 +154,4 @@ async fn main() {
 
     axum::serve(listener, app).await.unwrap();
 }
+
