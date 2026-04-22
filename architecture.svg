@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="900" height="200" viewBox="0 0 900 200" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    .box { fill: #f5f5f5; stroke: #333; stroke-width: 2; rx: 10; ry: 10; }
+    .text { font-family: Arial, sans-serif; font-size: 14px; fill: #111; text-anchor: middle; dominant-baseline: middle; }
+    .arrow { stroke: #333; stroke-width: 2; marker-end: url(#arrowhead); }
+  </style>
+
+  <defs>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" 
+      refX="10" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#333" />
+    </marker>
+  </defs>
+
+  <!-- Boxes -->
+  <rect x="20" y="60" width="150" height="60" class="box"/>
+  <text x="95" y="90" class="text">AI / OpenClaw</text>
+
+  <rect x="200" y="60" width="150" height="60" class="box"/>
+  <text x="275" y="90" class="text">JSON Output</text>
+
+  <rect x="380" y="60" width="150" height="60" class="box"/>
+  <text x="455" y="90" class="text">Mini Sandbox API</text>
+
+  <rect x="560" y="60" width="150" height="60" class="box"/>
+  <text x="635" y="90" class="text">Policy + Validation</text>
+
+  <rect x="740" y="60" width="150" height="60" class="box"/>
+  <text x="815" y="90" class="text">System Execution</text>
+
+  <!-- Arrows -->
+  <line x1="170" y1="90" x2="200" y2="90" class="arrow"/>
+  <line x1="350" y1="90" x2="380" y2="90" class="arrow"/>
+  <line x1="530" y1="90" x2="560" y2="90" class="arrow"/>
+  <line x1="710" y1="90" x2="740" y2="90" class="arrow"/>
+
+</svg>
