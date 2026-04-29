@@ -6,9 +6,9 @@ A minimal Rust-based safety layer for executing AI-generated commands on local s
 
 ## Concept
 
-AI -> JSON -> API -> Sandbox -> System
+AI → JSON → API → Sandbox → System
 
-The AI suggests commands.
+The AI suggests commands.  
 Mini Sandbox validates and executes them safely.
 
 ---
@@ -19,19 +19,54 @@ Mini Sandbox validates and executes them safely.
 
 ---
 
-## OpenClaw Integration
+## AI Integration
 
-Mini Sandbox can be used as a safe execution layer for OpenClaw.
+Mini Sandbox works with any local AI that can output JSON.
 
-Flow:
-OpenClaw -> JSON -> Mini Sandbox -> Safe Execution
+### Flow
 
-Example JSON:
+AI → JSON → Mini Sandbox → Safe Execution
+
+Example:
+
 ```
 { "command": "ls", "args": [] }
 ```
 
-Use a simple bridge script to forward this JSON to the sandbox API.
+---
+
+## MLX Integration (Local AI)
+
+You can connect a local model using MLX.
+
+Flow:
+
+MLX → Python Bridge → Mini Sandbox → System
+
+### Steps
+
+1. Run the sandbox API  
+   cargo run
+
+2. Run the agent bridge  
+   python examples/run_agent.py
+
+This script:
+- Generates a command using MLX
+- Extracts valid JSON
+- Sends it to the sandbox
+
+> `run_agent.py` is a reference implementation (not required for usage)
+
+---
+
+## OpenClaw Integration
+
+Flow:
+
+OpenClaw → JSON → Mini Sandbox → Safe Execution
+
+Use a bridge script to forward commands to the API.
 
 ---
 
@@ -47,7 +82,6 @@ Use a simple bridge script to forward this JSON to the sandbox API.
 ---
 
 ## Setup
-
 ```
 git clone https://github.com/shreyanshvyas414/mini-sandbox.git
 cd mini-sandbox
@@ -64,13 +98,14 @@ cargo run
 ```
 ./scripts/agent_exec.sh ls
 ```
+
 or
+
 ```
 curl -X POST http://localhost:3000/execute \
 -H "Content-Type: application/json" \
 -d '{"command":"ls","args":[]}'
 ```
-
 ---
 
 ## Philosophy
