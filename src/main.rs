@@ -5,7 +5,9 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::process::{Command, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tower::buffer::BufferLayer;
 use tower::limit::RateLimitLayer;
+use tower::ServiceBuilder;
 use wait_timeout::ChildExt;
 
 #[derive(Deserialize)]
@@ -194,10 +196,13 @@ async fn execute(Json(payload): Json<CommandRequest>) -> Json<serde_json::Value>
 
 #[tokio::main]
 async fn main() {
-    let app = Router::new()
-        .route("/execute", post(execute))
-        // Cap at 10 requests per second to protect against runaway AI loops.
-        .layer(RateLimitLayer::new(10, Duration::from_secs(1)));
+    // BufferLayer wraps the service in an Arc-based queue, which gives it
+    // the Clone impl that Axum requires. RateLimitLayer alone is not Clone.
+    let app = Router::new().route("/execute", post(execute)).layer(
+        ServiceBuilder::new()
+            .layer(BufferLayer::new(1024))
+            .layer(RateLimitLayer::new(10, Duration::from_secs(1))),
+    );
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
         .await
