@@ -212,3 +212,148 @@ async fn main() {
 
     axum::serve(listener, app).await.unwrap();
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Command allowlist
+
+    #[test]
+    fn allowed_commands_resolve_to_absolute_paths() {
+        assert_eq!(resolve_command("ls"), Some("/bin/ls"));
+        assert_eq!(resolve_command("pwd"), Some("/bin/pwd"));
+        assert_eq!(resolve_command("cat"), Some("/bin/cat"));
+        assert_eq!(resolve_command("echo"), Some("/bin/echo"));
+    }
+
+    #[test]
+    fn blocked_commands_return_none() {
+        for cmd in &["rm", "bash", "sh", "curl", "wget", "python", "sudo", ""] {
+            assert!(
+                resolve_command(cmd).is_none(),
+                "expected '{}' to be blocked",
+                cmd
+            );
+        }
+    }
+
+    // Cat extension guard
+
+    #[test]
+    fn cat_allows_text_extensions() {
+        for file in &[
+            "notes.txt",
+            "output.log",
+            "config.json",
+            "README.md",
+            "Cargo.toml",
+            "docker.yaml",
+            "values.yml",
+        ] {
+            let allowed = ALLOWED_CAT_EXTENSIONS.iter().any(|e| file.ends_with(e));
+            assert!(allowed, "expected '{}' to be allowed for cat", file);
+        }
+    }
+
+    #[test]
+    fn cat_blocks_non_text_extensions() {
+        for file in &[
+            "script.sh",
+            "binary.bin",
+            "archive.tar",
+            "image.png",
+            "Makefile",
+            "run.py",
+        ] {
+            let allowed = ALLOWED_CAT_EXTENSIONS.iter().any(|e| file.ends_with(e));
+            assert!(!allowed, "expected '{}' to be blocked for cat", file);
+        }
+    }
+
+    // Argument character allowlist
+
+    fn is_safe_arg(arg: &str) -> bool {
+        arg.chars()
+            .all(|c| c.is_alphanumeric() || "-_./".contains(c))
+    }
+
+    #[test]
+    fn safe_args_pass_character_check() {
+        for arg in &["hello", "file.txt", "my-dir", "sub_dir", "path/to/file.md"] {
+            assert!(is_safe_arg(arg), "expected '{}' to be safe", arg);
+        }
+    }
+
+    #[test]
+    fn dangerous_args_fail_character_check() {
+        for arg in &["hello; rm -rf", "$(whoami)", "a|b", "foo\nbar", "arg&bg"] {
+            assert!(!is_safe_arg(arg), "expected '{}' to be blocked", arg);
+        }
+    }
+
+    // Directory traversal detection
+
+    #[test]
+    fn traversal_patterns_are_detected() {
+        for arg in &["../../etc", "../secret", "foo/../../bar"] {
+            assert!(
+                arg.contains(".."),
+                "expected '{}' to trigger traversal check",
+                arg
+            );
+        }
+    }
+
+    #[test]
+    fn normal_paths_do_not_trigger_traversal() {
+        for arg in &["subdir/file.txt", "logs/output.log", "file.md"] {
+            assert!(
+                !arg.contains(".."),
+                "expected '{}' to pass traversal check",
+                arg
+            );
+        }
+    }
+
+    // Absolute path detection
+
+    #[test]
+    fn absolute_paths_are_blocked() {
+        for arg in &["/etc/passwd", "/bin/bash", "/"] {
+            assert!(arg.starts_with('/'), "expected '{}' to be blocked", arg);
+        }
+    }
+
+    #[test]
+    fn relative_paths_are_allowed() {
+        for arg in &["file.txt", "subdir/notes.md", "./local.json"] {
+            assert!(!arg.starts_with('/'), "expected '{}' to pass", arg);
+        }
+    }
+
+    // Flag allowlist
+
+    #[test]
+    fn allowed_flags_pass() {
+        for flag in &["-l", "-a"] {
+            assert!(
+                ALLOWED_FLAGS.contains(flag),
+                "expected flag '{}' to be allowed",
+                flag
+            );
+        }
+    }
+
+    #[test]
+    fn disallowed_flags_are_blocked() {
+        for flag in &["-R", "-rf", "--help", "--all", "-la"] {
+            assert!(
+                !ALLOWED_FLAGS.contains(flag),
+                "expected flag '{}' to be blocked",
+                flag
+            );
+        }
+    }
+}
+
