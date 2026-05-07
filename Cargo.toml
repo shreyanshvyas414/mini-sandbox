@@ -10,4 +10,4 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 wait-timeout = "0.2"
 dirs = "5.0"
-tower = { version = "0.4", features = ["limit"] }
+tower = { version = "0.4", features = ["limit", "buffer"] }
